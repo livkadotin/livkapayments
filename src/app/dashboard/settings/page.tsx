@@ -92,7 +92,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                <span className="font-semibold text-slate-800 block">Main ReplyFlow Website</span>
+                <span className="font-semibold text-slate-800 block">Main Livka Website</span>
                 <span className="font-mono text-slate-700 font-bold block mt-1">
                   https://livka.in
                 </span>
