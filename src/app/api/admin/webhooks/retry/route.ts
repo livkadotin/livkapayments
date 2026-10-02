@@ -56,9 +56,9 @@ export async function POST(req: NextRequest) {
         headers: {
           "Content-Type": "application/json",
           "x-livka-signature": signature,
-          "x-livka-event": delivery.event,
-          "x-livka-delivery": `retry_${delivery.id}_${Date.now()}`,
-          "x-replyflow-signature": signature,
+        "x-livka-event": event,
+        "x-livka-delivery": `del_${Date.now()}_${attempt}`,
+        "x-replyflow-signature": signature,
           "x-replyflow-event": delivery.event,
           "x-replyflow-delivery": `retry_${delivery.id}_${Date.now()}`,
           "User-Agent": "LivkaPay-Webhooks/1.0",
