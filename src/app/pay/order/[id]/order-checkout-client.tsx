@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect } from "react";
 import { formatCurrency } from "@/lib/utils";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ShieldCheck, Lock, CheckCircle2, AlertCircle, Loader2, ArrowRight } from "lucide-react";
+import { ShieldCheck, Lock, CheckCircle2, Loader2, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 declare global {
@@ -13,38 +13,60 @@ declare global {
   }
 }
 
-export default function PublicPaymentPage({
-  params,
-}: {
-  params: Promise<{ code: string }>;
-}) {
-  const { code } = use(params);
+interface OrderCheckoutData {
+  order: {
+    id: string;
+    amount: number;
+    currency: string;
+    receipt: string | null;
+    status: string;
+    razorpayOrderId: string | null;
+    createdAt: string;
+    notes: Record<string, any>;
+  };
+  website: {
+    id: string;
+    name: string;
+    domain: string;
+    logoUrl: string | null;
+  };
+  customer: {
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+  } | null;
+  razorpayKeyId: string;
+  latestPayment: {
+    id: string;
+    razorpayPaymentId: string | null;
+    status: string;
+    method: string | null;
+  } | null;
+}
 
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+export function OrderCheckoutClient({ data }: { data: OrderCheckoutData }) {
   const [paying, setPaying] = useState(false);
-  const [isPaid, setIsPaid] = useState(false);
-  const [paidDetails, setPaidDetails] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [isPaid, setIsPaid] = useState(data.order.status === "PAID");
+  const [paidDetails, setPaidDetails] = useState<{
+    paymentId: string;
+    method: string;
+  } | null>(
+    data.latestPayment
+      ? {
+          paymentId: data.latestPayment.razorpayPaymentId || "",
+          method: data.latestPayment.method || "Online",
+        }
+      : null
+  );
+
+  const redirectUrl =
+    data.order.notes?.redirect_url ||
+    data.order.notes?.callback_url ||
+    data.order.notes?.return_url ||
+    null;
 
   useEffect(() => {
-    // 1. Fetch payment link details
-    fetch(`/api/v1/payment-links/${code}`)
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.success) {
-          setData(res.payment_link);
-          if (res.alreadyPaid || res.payment_link.status === "PAID") {
-            setIsPaid(true);
-          }
-        } else {
-          setError(res.error || "Payment link is invalid or expired");
-        }
-      })
-      .catch(() => setError("Failed to load payment link"))
-      .finally(() => setLoading(false));
-
-    // 2. Load Razorpay Checkout Script dynamically
+    // Load Razorpay Checkout Script
     if (!document.getElementById("razorpay-checkout-js")) {
       const script = document.createElement("script");
       script.id = "razorpay-checkout-js";
@@ -52,53 +74,25 @@ export default function PublicPaymentPage({
       script.async = true;
       document.body.appendChild(script);
     }
-  }, [code]);
+  }, []);
 
   const handlePay = async () => {
-    if (!data) return;
     setPaying(true);
 
-    const isSimulated = data.is_simulated || !window.Razorpay;
-
-    if (isSimulated) {
-      // In simulated development mode without live Razorpay credentials, trigger server-side capture
-      try {
-        const simRes = await fetch("/api/v1/simulate/pay", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            order_id: data.order.id,
-            method: "upi",
-          }),
-        });
-        const simJson = await simRes.json();
-        if (simJson.success) {
-          setIsPaid(true);
-          setPaidDetails({
-            paymentId: simJson.payment.razorpay_payment_id,
-            method: "UPI (Simulated)",
-          });
-          toast.success("Payment confirmed successfully!");
-        } else {
-          toast.error(simJson.error || "Payment failed");
-        }
-      } catch (err: any) {
-        toast.error(err.message || "Payment simulation failed");
-      } finally {
-        setPaying(false);
-      }
+    if (!window.Razorpay) {
+      toast.error("Payment SDK is loading, please wait a moment.");
+      setPaying(false);
       return;
     }
 
-    // Live Razorpay Checkout
     const options = {
-      key: data.razorpay_key_id,
-      amount: Math.round(data.amount * 100),
-      currency: data.currency || "INR",
-      name: data.website?.name || "Livka Pay",
-      image: data.website?.logoUrl || undefined,
-      description: data.description || `Payment for ${data.code}`,
-      order_id: data.order.razorpay_order_id,
+      key: data.razorpayKeyId,
+      amount: Math.round(data.order.amount * 100),
+      currency: data.order.currency || "INR",
+      name: data.website.name || "Livka Pay",
+      image: data.website.logoUrl || undefined,
+      description: `Payment for #${data.order.receipt || data.order.id}`,
+      order_id: data.order.razorpayOrderId,
       prefill: {
         name: data.customer?.name || "",
         email: data.customer?.email || "",
@@ -108,7 +102,6 @@ export default function PublicPaymentPage({
         color: "#059669",
       },
       handler: async function (response: any) {
-        // Server-Side Verification
         try {
           const verifyRes = await fetch("/api/v1/payments/verify", {
             method: "POST",
@@ -120,6 +113,7 @@ export default function PublicPaymentPage({
               razorpay_signature: response.razorpay_signature,
             }),
           });
+
           const verifyJson = await verifyRes.json();
           if (verifyJson.success) {
             setIsPaid(true);
@@ -128,6 +122,12 @@ export default function PublicPaymentPage({
               method: "Online",
             });
             toast.success("Payment verified & confirmed!");
+
+            if (redirectUrl) {
+              setTimeout(() => {
+                window.location.href = redirectUrl;
+              }, 2500);
+            }
           } else {
             toast.error("Signature verification failed server-side.");
           }
@@ -147,41 +147,17 @@ export default function PublicPaymentPage({
     try {
       const rzp = new window.Razorpay(options);
       rzp.open();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Razorpay open error:", err);
+      toast.error(err.message || "Failed to open checkout window");
       setPaying(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
-          <span className="text-xs text-slate-500 font-medium">Loading secure checkout...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-        <Card className="max-w-md w-full p-8 text-center shadow-lg border-slate-200">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-rose-600 mb-3">
-            <AlertCircle className="h-6 w-6" />
-          </div>
-          <h2 className="text-lg font-bold text-slate-900">Payment Link Unavailable</h2>
-          <p className="text-xs text-slate-500 mt-1">{error}</p>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex flex-col justify-center items-center bg-gradient-to-b from-slate-50 via-slate-100/50 to-slate-100 p-4 py-8 sm:py-12">
       <div className="w-full max-w-md space-y-4">
-        {/* ReplyFlow Branding Header */}
+        {/* Branding Header */}
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white font-bold text-xs">
@@ -201,15 +177,24 @@ export default function PublicPaymentPage({
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-xs text-slate-400 block font-medium">Merchant</span>
-                    <h2 className="text-lg font-bold text-white">{data?.website?.name}</h2>
+                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                      {data.website.logoUrl && (
+                        <img
+                          src={data.website.logoUrl}
+                          alt={data.website.name}
+                          className="w-5 h-5 rounded object-contain bg-white/10"
+                        />
+                      )}
+                      {data.website.name}
+                    </h2>
                     <span className="text-[11px] text-slate-400 font-mono block">
-                      {data?.website?.domain}
+                      {data.website.domain}
                     </span>
                   </div>
                   <div className="text-right">
                     <span className="text-xs text-slate-400 block font-medium">Total Due</span>
                     <span className="text-2xl font-bold font-mono text-emerald-400">
-                      {formatCurrency(data?.amount, data?.currency)}
+                      {formatCurrency(data.order.amount, data.order.currency)}
                     </span>
                   </div>
                 </div>
@@ -217,19 +202,25 @@ export default function PublicPaymentPage({
 
               {/* Card Body */}
               <CardContent className="p-6 space-y-5">
-                {data?.description && (
-                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-3.5 text-xs text-slate-700">
-                    <span className="font-semibold text-slate-800 block mb-0.5">Description:</span>
-                    <span>{data.description}</span>
+                <div className="rounded-lg bg-slate-50 border border-slate-200 p-3.5 text-xs text-slate-700 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Order ID:</span>
+                    <span className="font-mono font-medium">{data.order.id}</span>
                   </div>
-                )}
+                  {data.order.receipt && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Receipt Ref:</span>
+                      <span className="font-mono font-medium">{data.order.receipt}</span>
+                    </div>
+                  )}
+                </div>
 
-                {data?.customer && (
+                {data.customer && (
                   <div className="space-y-1 text-xs text-slate-500 border-t border-slate-100 pt-3">
                     <div className="flex justify-between">
                       <span>Billed to:</span>
                       <span className="font-semibold text-slate-800">
-                        {data.customer.name || data.customer.email}
+                        {data.customer.name || data.customer.email || data.customer.phone}
                       </span>
                     </div>
                   </div>
@@ -244,12 +235,12 @@ export default function PublicPaymentPage({
                     {paying ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Processing...
+                        Opening Payment Modal...
                       </>
                     ) : (
                       <>
                         <Lock className="mr-2 h-4 w-4" />
-                        Pay {formatCurrency(data?.amount, data?.currency)} Securely
+                        Pay {formatCurrency(data.order.amount, data.order.currency)} Securely
                       </>
                     )}
                   </Button>
@@ -278,13 +269,13 @@ export default function PublicPaymentPage({
                 <div className="flex justify-between">
                   <span className="text-slate-500 font-sans">Merchant:</span>
                   <span className="font-semibold text-slate-900 font-sans">
-                    {data?.website?.name}
+                    {data.website.name}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500 font-sans">Amount:</span>
                   <span className="font-bold text-emerald-700">
-                    {formatCurrency(data?.amount, data?.currency)}
+                    {formatCurrency(data.order.amount, data.order.currency)}
                   </span>
                 </div>
                 {paidDetails?.paymentId && (
@@ -299,9 +290,23 @@ export default function PublicPaymentPage({
                 </div>
               </div>
 
-              <p className="text-[11px] text-slate-400">
-                A confirmation has been transmitted to {data?.website?.name}. You may safely close this window.
-              </p>
+              {redirectUrl ? (
+                <div className="pt-2">
+                  <Button
+                    onClick={() => (window.location.href = redirectUrl)}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs"
+                  >
+                    Return to {data.website.name} <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                  <p className="text-[10px] text-slate-400 mt-2">
+                    Redirecting automatically in a moment...
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400">
+                  A confirmation has been transmitted to {data.website.name}. You may safely close this window.
+                </p>
+              )}
             </div>
           )}
         </Card>

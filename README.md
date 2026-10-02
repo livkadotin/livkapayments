@@ -8,6 +8,9 @@ The platform is designed to be hosted at:
 > **https://payments.livka.in**  
 > *(The main marketing and support website at `https://livka.in` remains completely separate and unaffected).*
 
+> 🚀 **Integrating Livka Pay into your own store or SaaS project?**  
+> Check out the complete, copy-pasteable guide: **[`INTEGRATION.md`](./INTEGRATION.md)** (with code for Next.js, Node.js, Python, PHP, and AI prompts for Cursor/Copilot/Claude).
+
 ---
 
 ## Architecture
