@@ -1,0 +1,278 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  role         String     @default("ADMIN") // OWNER, ADMIN, VIEWER
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  auditLogs    AuditLog[]
+
+  @@index([email])
+}
+
+model Website {
+  id              String            @id // e.g. "livka_001", "replyflow_001"
+  name            String
+  slug            String            @unique
+  domain          String
+  allowedDomains  String            @default("[]") // JSON string array: ["livka.in", "www.livka.in"]
+  description     String?
+  logoUrl         String?
+  status          String            @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  apiKeys         ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+  orders          Order[]
+  payments        Payment[]
+  refunds         Refund[]
+  paymentLinks    PaymentLink[]
+  qrPayments      QrPayment[]
+  analyticsEvents AnalyticsEvent[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ApiKey {
+  id              String    @id @default(cuid())
+  websiteId       String
+  name            String    @default("Default Production Key")
+  publishableKey  String    @unique // pk_live_xxxxx
+  secretKeyHash   String    // SHA-256 hash of secret key
+  secretKeyPrefix String    // e.g. "sk_live_abc123"
+  webhookSecret   String    // whsec_xxxxx
+  status          String    @default("ACTIVE") // ACTIVE, REVOKED
+  lastUsedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  website         Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId])
+  @@index([publishableKey])
+  @@index([secretKeyHash])
+  @@index([status])
+}
+
+model WebhookEndpoint {
+  id          String            @id @default(cuid())
+  websiteId   String
+  url         String
+  events      String            @default("[\"payment.captured\",\"order.paid\",\"refund.processed\"]") // JSON array
+  secret      String?
+  status      String            @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  website     Website           @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  deliveries  WebhookDelivery[]
+
+  @@index([websiteId])
+  @@index([status])
+}
+
+model WebhookDelivery {
+  id             String          @id @default(cuid())
+  endpointId     String
+  event          String
+  payload        String
+  responseStatus Int?
+  responseBody   String?
+  durationMs     Int?
+  success        Boolean         @default(false)
+  attempts       Int             @default(1)
+  createdAt      DateTime        @default(now())
+  endpoint       WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId])
+  @@index([event])
+  @@index([createdAt])
+}
+
+model WebhookEvent {
+  id              String    @id @default(cuid())
+  razorpayEventId String?   @unique
+  event           String
+  payload         String
+  signature       String?
+  processed       Boolean   @default(false)
+  processedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([event])
+  @@index([processed])
+  @@index([createdAt])
+}
+
+model Customer {
+  id           String        @id @default(cuid())
+  name         String?
+  email        String?
+  phone        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  orders       Order[]
+  payments     Payment[]
+  paymentLinks PaymentLink[]
+
+  @@index([email])
+  @@index([phone])
+}
+
+model Order {
+  id              String      @id // e.g. "ord_10291"
+  websiteId       String
+  customerId      String?
+  amount          Float       // in INR
+  currency        String      @default("INR")
+  receipt         String?     // Website reference e.g. "LV-10291"
+  status          String      @default("CREATED") // CREATED, PENDING, PAID, FAILED, CANCELLED, REFUNDED, PARTIALLY_REFUNDED
+  notes           String?     // JSON metadata
+  razorpayOrderId String?     @unique
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  website         Website     @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  customer        Customer?   @relation(fields: [customerId], references: [id])
+  payments        Payment[]
+  qrPayment       QrPayment?
+
+  @@index([websiteId])
+  @@index([razorpayOrderId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Payment {
+  id                String    @id @default(cuid()) // internal payment id
+  orderId           String
+  websiteId         String
+  customerId        String?
+  amount            Float
+  currency          String    @default("INR")
+  status            String    @default("CREATED") // CREATED, AUTHORIZED, CAPTURED, FAILED, REFUNDED
+  method            String?   // upi, card, netbanking, wallet
+  razorpayPaymentId String?   @unique
+  razorpayOrderId   String?
+  razorpaySignature String?
+  errorReason       String?
+  capturedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  order             Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  website           Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  customer          Customer? @relation(fields: [customerId], references: [id])
+  refunds           Refund[]
+
+  @@index([orderId])
+  @@index([websiteId])
+  @@index([razorpayPaymentId])
+  @@index([razorpayOrderId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PaymentLink {
+  id          String    @id @default(cuid())
+  websiteId   String
+  customerId  String?
+  code        String    @unique // e.g. "pl_7a9f2"
+  amount      Float
+  currency    String    @default("INR")
+  description String?
+  referenceId String?
+  status      String    @default("ACTIVE") // ACTIVE, PAID, EXPIRED, CANCELLED
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  website     Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  customer    Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([websiteId])
+  @@index([code])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model QrPayment {
+  id            String    @id @default(cuid())
+  websiteId     String
+  orderId       String    @unique
+  amount        Float
+  currency      String    @default("INR")
+  customerName  String?
+  customerEmail String?
+  customerPhone String?
+  qrData        String
+  status        String    @default("ACTIVE") // ACTIVE, PAID, EXPIRED
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  website       Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId])
+  @@index([orderId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Refund {
+  id               String    @id @default(cuid())
+  paymentId        String
+  websiteId        String
+  amount           Float
+  currency         String    @default("INR")
+  reason           String?
+  status           String    @default("PENDING") // PENDING, PROCESSED, FAILED
+  razorpayRefundId String?   @unique
+  processedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  payment          Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  website          Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([websiteId])
+  @@index([razorpayRefundId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  websiteId String
+  eventType String   // payment_captured, refund_issued, etc.
+  amount    Float?
+  currency  String?  @default("INR")
+  metadata  String?  // JSON
+  createdAt DateTime @default(now())
+  website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String   // e.g. "WEBSITE_CREATED", "KEY_ROTATED", "PAYMENT_REFUNDED"
+  resource   String   // e.g. "Website", "Payment", "ApiKey"
+  resourceId String?
+  details    String?  // JSON
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
