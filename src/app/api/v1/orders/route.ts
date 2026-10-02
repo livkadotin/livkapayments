@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
         },
         razorpay_order_id: rzpOrder.id,
         razorpay_key_id: publicConfig.keyId,
+        website_name: website.name,
         checkout_url: `${process.env.APP_URL || ""}/pay/order/${order.id}`,
       },
       { status: 201 }

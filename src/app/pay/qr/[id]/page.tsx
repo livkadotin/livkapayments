@@ -95,6 +95,7 @@ export default function PublicQrPage({
       currency: qrData.currency || "INR",
       name: qrData.website?.name || "Livka Pay",
       description: `QR Payment for ${qrData.order.receipt || qrData.order.id}`,
+      image: qrData.website?.logoUrl || undefined,
       order_id: qrData.order.razorpayOrderId,
       prefill: {
         name: qrData.customer_name || "",

@@ -97,6 +97,7 @@ export default function PublicPaymentPage({
       currency: data.currency || "INR",
       name: data.website?.name || "Livka Pay",
       description: data.description || `Payment for ${data.code}`,
+      image: data.website?.logoUrl || undefined,
       order_id: data.order.razorpay_order_id,
       prefill: {
         name: data.customer?.name || "",
