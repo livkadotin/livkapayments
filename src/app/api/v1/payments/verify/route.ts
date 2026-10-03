@@ -31,6 +31,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Order not found" }, { status: 404 });
     }
 
+    // Idempotency: if order was already paid (e.g. via QR or parallel online attempt), return immediately
+    if (order.status === "PAID") {
+      const existingPayment = await db.payment.findFirst({
+        where: { orderId: order.id, status: "CAPTURED" },
+        orderBy: { createdAt: "desc" },
+      });
+
+      return NextResponse.json({
+        success: true,
+        verified: true,
+        alreadyPaid: true,
+        status: "PAID",
+        order: {
+          id: order.id,
+          receipt: order.receipt,
+          amount: order.amount,
+          currency: order.currency,
+          status: "PAID",
+        },
+        payment: existingPayment
+          ? {
+              id: existingPayment.id,
+              razorpay_payment_id: existingPayment.razorpayPaymentId,
+              status: "CAPTURED",
+            }
+          : undefined,
+        message: "Order has already been verified and marked PAID",
+      });
+    }
+
     // Razorpay signature verification
     const secret = process.env.RAZORPAY_KEY_SECRET || "simulated_secret_key";
     const isSimulated =
