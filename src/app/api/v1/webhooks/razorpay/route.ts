@@ -150,6 +150,20 @@ export async function POST(req: NextRequest) {
             payment_id: rzpPaymentId,
             amount,
             currency,
+            order: {
+              id: order.id,
+              receipt: order.receipt,
+              amount: order.amount,
+              currency: order.currency,
+              status: isCaptured ? "PAID" : "PENDING",
+            },
+            payment: {
+              id: payment.id,
+              razorpay_payment_id: rzpPaymentId,
+              status: isCaptured ? "CAPTURED" : "AUTHORIZED",
+              amount: payment.amount,
+              method: payment.method,
+            },
             data: {
               internal_order_id: order.id,
               internal_payment_id: payment.id,

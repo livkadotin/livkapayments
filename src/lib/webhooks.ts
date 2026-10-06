@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { signWebhookPayload } from "./crypto";
+import crypto from "crypto";
 
 export interface OutgoingWebhookPayload {
   event: string;
@@ -11,6 +12,8 @@ export interface OutgoingWebhookPayload {
   currency: string;
   timestamp: string;
   data?: Record<string, any>;
+  order?: { id: string; receipt: string | null; amount: number; currency: string; status: string };
+  payment?: { id: string; razorpay_payment_id: string; status: string; amount: number; method: string | null };
 }
 
 export async function dispatchWebsiteWebhooks(
@@ -63,8 +66,10 @@ export async function dispatchWebsiteWebhooks(
       const secretToUse = endpoint.secret || webhookSecret;
       const signature = signWebhookPayload(payloadString, secretToUse);
 
-      // Execute delivery asynchronously
-      deliverWebhook(endpoint.id, endpoint.url, payloadString, signature, event);
+      // Await delivery so that the first attempt and its result are recorded before
+      // the payment verification request returns.
+      const deliveryId = `del_${crypto.createHash("sha256").update(`${endpoint.id}:${payloadString}`).digest("hex").slice(0, 32)}`;
+      await deliverWebhook(endpoint.id, endpoint.url, payloadString, signature, event, 1, deliveryId);
     }
   } catch (err) {
     console.error("Error preparing outbound website webhooks:", err);
@@ -77,7 +82,8 @@ async function deliverWebhook(
   payloadString: string,
   signature: string,
   event: string,
-  attempt: number = 1
+  attempt: number = 1,
+  deliveryId: string
 ) {
   const startTime = Date.now();
   let responseStatus: number | null = null;
@@ -94,10 +100,10 @@ async function deliverWebhook(
         "Content-Type": "application/json",
         "x-livka-signature": signature,
         "x-livka-event": event,
-        "x-livka-delivery": `del_${Date.now()}_${attempt}`,
+        "x-livka-delivery": deliveryId,
         "x-replyflow-signature": signature,
         "x-replyflow-event": event,
-        "x-replyflow-delivery": `del_${Date.now()}_${attempt}`,
+        "x-replyflow-delivery": deliveryId,
         "User-Agent": "LivkaPay-Webhooks/1.0",
       },
       body: payloadString,
@@ -134,11 +140,12 @@ async function deliverWebhook(
     console.error("Failed to log webhook delivery:", dbErr);
   }
 
-  // If failed and attempt < 3, retry with backoff
-  if (!success && attempt < 3) {
-    const delay = attempt === 1 ? 5000 : 15000;
-    setTimeout(() => {
-      deliverWebhook(endpointId, url, payloadString, signature, event, attempt + 1);
-    }, delay);
+  // Retry transient failures with the same delivery ID and signed raw body.
+  // The attempt cap prevents a permanently unavailable endpoint from holding
+  // the payment verification request indefinitely; admins can retry logged rows.
+  if (!success && attempt < 8) {
+    const delay = Math.min(1000 * 2 ** (attempt - 1), 30000);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    await deliverWebhook(endpointId, url, payloadString, signature, event, attempt + 1, deliveryId);
   }
 }

@@ -44,7 +44,16 @@ export async function GET(
       customer: order.customer
         ? { name: order.customer.name, email: order.customer.email, phone: order.customer.phone }
         : null,
-      payments: order.payments,
+      payments: order.payments.map((payment) => ({
+        id: payment.id,
+        razorpay_payment_id: payment.razorpayPaymentId,
+        status: payment.status,
+        amount: payment.amount,
+        currency: payment.currency,
+        method: payment.method,
+        captured_at: payment.capturedAt,
+        refunds: payment.refunds,
+      })),
       qr_payment: order.qrPayment,
     },
   });

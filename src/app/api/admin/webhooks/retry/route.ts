@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest, hasPermission } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { signWebhookPayload } from "@/lib/crypto";
+import crypto from "crypto";
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromRequest(req);
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
       "whsec_default";
 
     const signature = signWebhookPayload(delivery.payload, secret);
+    const stableDeliveryId = `del_${crypto.createHash("sha256").update(`${delivery.endpointId}:${delivery.payload}`).digest("hex").slice(0, 32)}`;
 
     const startTime = Date.now();
     let responseStatus = 500;
@@ -57,10 +59,10 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json",
           "x-livka-signature": signature,
           "x-livka-event": delivery.event,
-          "x-livka-delivery": `retry_${delivery.id}_${Date.now()}`,
+          "x-livka-delivery": stableDeliveryId,
           "x-replyflow-signature": signature,
           "x-replyflow-event": delivery.event,
-          "x-replyflow-delivery": `retry_${delivery.id}_${Date.now()}`,
+          "x-replyflow-delivery": stableDeliveryId,
           "User-Agent": "LivkaPay-Webhooks/1.0",
         },
         body: delivery.payload,
