@@ -78,7 +78,8 @@ export async function createRazorpayOrder(params: CreateOrderParams): Promise<Ra
         isSimulated: false,
       };
     } catch (err: any) {
-      console.error("Razorpay orders.create failed, falling back to simulated order:", err.message);
+      console.error("Razorpay orders.create failed:", err.message);
+      throw new Error("Payment service is temporarily unavailable. Please try again.");
     }
   }
 

@@ -60,6 +60,7 @@ export default async function OrderCheckoutPage({
         }
       : null,
     razorpayKeyId: publicConfig.keyId,
+    isSimulated: publicConfig.isSimulated,
     latestPayment: order.payments[0]
       ? {
           id: order.payments[0].id,

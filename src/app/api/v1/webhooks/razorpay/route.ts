@@ -92,10 +92,12 @@ export async function POST(req: NextRequest) {
           });
 
           // If linked to QR payment, mark QR as PAID
-          await db.qrPayment.updateMany({
-            where: { orderId: order.id },
-            data: { status: "PAID" },
-          });
+          if (isCaptured) {
+            await db.qrPayment.updateMany({
+              where: { orderId: order.id },
+              data: { status: "PAID" },
+            });
+          }
 
           // Upsert Payment Record
           let payment = await db.payment.findFirst({
@@ -130,22 +132,24 @@ export async function POST(req: NextRequest) {
           }
 
           // Record Analytics Event
-          await db.analyticsEvent.create({
-            data: {
-              websiteId: order.websiteId,
-              eventType: "payment_captured",
-              amount,
-              currency,
-              metadata: JSON.stringify({
-                orderId: order.id,
-                paymentId: payment.id,
-                method,
-              }),
-            },
-          });
+          if (isCaptured) {
+            await db.analyticsEvent.create({
+              data: {
+                websiteId: order.websiteId,
+                eventType: "payment_captured",
+                amount,
+                currency,
+                metadata: JSON.stringify({
+                  orderId: order.id,
+                  paymentId: payment.id,
+                  method,
+                }),
+              },
+            });
+          }
 
           // Dispatch Outgoing Website Webhook
-          await dispatchWebsiteWebhooks(order.websiteId, "payment.captured", {
+          if (isCaptured) await dispatchWebsiteWebhooks(order.websiteId, "payment.captured", {
             order_id: order.receipt || order.id,
             payment_id: rzpPaymentId,
             amount,
@@ -162,6 +166,7 @@ export async function POST(req: NextRequest) {
               razorpay_payment_id: rzpPaymentId,
               status: isCaptured ? "CAPTURED" : "AUTHORIZED",
               amount: payment.amount,
+              currency: payment.currency,
               method: payment.method,
             },
             data: {
@@ -173,15 +178,17 @@ export async function POST(req: NextRequest) {
           });
 
           // Notify Real-Time Event Bus for Admin Dashboard
-          eventBus.notifyPaymentCaptured({
-            paymentId: payment.id,
-            orderId: order.id,
-            websiteId: order.websiteId,
-            websiteName: order.website.name,
-            amount,
-            currency,
-            method,
-          });
+          if (isCaptured) {
+            eventBus.notifyPaymentCaptured({
+              paymentId: payment.id,
+              orderId: order.id,
+              websiteId: order.websiteId,
+              websiteName: order.website.name,
+              amount,
+              currency,
+              method,
+            });
+          }
 
           console.log(`✅ Payment captured: ₹${amount} for website ${order.website.name} (Order: ${order.id})`);
         }

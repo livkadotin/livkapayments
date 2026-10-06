@@ -31,6 +31,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Order not found" }, { status: 404 });
     }
 
+    if (!order.razorpayOrderId || razorpay_order_id !== order.razorpayOrderId) {
+      return NextResponse.json(
+        { success: false, error: "Payment does not match this order" },
+        { status: 400 }
+      );
+    }
+
     // Idempotency: if order was already paid (e.g. via QR or parallel online attempt), return immediately
     if (order.status === "PAID") {
       const existingPayment = await db.payment.findFirst({
@@ -64,9 +71,9 @@ export async function POST(req: NextRequest) {
     // Razorpay signature verification
     const secret = process.env.RAZORPAY_KEY_SECRET || "simulated_secret_key";
     const isSimulated =
-      razorpay_payment_id.startsWith("pay_sim_") ||
-      razorpay_order_id?.startsWith("order_sim_") ||
-      process.env.NODE_ENV !== "production";
+      process.env.NODE_ENV !== "production" &&
+      razorpay_payment_id.startsWith("pay_sim_") &&
+      razorpay_order_id.startsWith("order_sim_");
 
     let signatureValid = false;
     if (razorpay_signature && razorpay_order_id) {
@@ -162,6 +169,7 @@ export async function POST(req: NextRequest) {
         razorpay_payment_id,
         status: "CAPTURED",
         amount: payment.amount,
+        currency: payment.currency,
         method: payment.method,
       },
       data: {

@@ -112,6 +112,29 @@ x-api-key: sk_live_your_secret_key
 }
 ```
 
+`order.id` is Livka Pay's stable order ID. Save it in your store database and
+use it for the checkout URL and later status queries. `order.receipt` echoes
+the `receipt` you sent (for example, your storefront order number), unchanged.
+Always redirect the customer to the returned `checkout_url`; do not construct
+the URL yourself. The values above are examples; IDs and timestamps vary by
+request.
+
+### Error Response
+
+Invalid request data returns `400`; missing/invalid API credentials return the
+corresponding authentication error. A validation error has this shape:
+
+```json
+{
+  "success": false,
+  "error": "Validation failed",
+  "details": {}
+}
+```
+
+Do not redirect the customer when `success` is false. Show a retryable checkout
+error and log the response on your server.
+
 ---
 
 ## 4. Frontend Checkout Options
@@ -230,6 +253,30 @@ In Livka Pay Dashboard (`https://payments.livka.in/dashboard/websites`):
     "phone": "9876543210"
   }
 }
+```
+
+The webhook is sent to the URL registered for your website. The `order.id`
+above is the same ID returned by order creation; `order.receipt` is your
+storefront order number. Treat `payment.status: "CAPTURED"` and
+`order.status: "PAID"` as the successful-payment signal. Verify the signature
+against the exact raw request bytes before parsing JSON, then update your local
+order idempotently using `order.id` (or your own order number in `receipt`).
+Return any `2xx` response after your server has accepted and recorded the
+event. Non-`2xx` responses and network failures are retried with the same
+`x-livka-delivery` ID; repeated deliveries must be safe to process. If the
+endpoint continues failing after automatic retries, inspect delivery status in
+the Livka Pay dashboard and retry the delivery there.
+
+Your webhook endpoint should respond with a small acknowledgement, for
+example:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+
+```json
+{ "received": true }
 ```
 
 ---
@@ -489,6 +536,7 @@ x-api-key: sk_live_your_secret_key
   "success": true,
   "order": {
     "id": "ord_819201_a1b2",
+    "website": { "id": "web_cm...", "name": "My Store", "domain": "yourstore.com" },
     "amount": 799,
     "currency": "INR",
     "receipt": "ORD-2026-1001",
@@ -496,8 +544,10 @@ x-api-key: sk_live_your_secret_key
     "payments": [
       {
         "id": "pay_9912",
-        "razorpayPaymentId": "pay_P8Y2aBC1234567",
+        "razorpay_payment_id": "pay_P8Y2aBC1234567",
         "status": "CAPTURED",
+        "amount": 799,
+        "currency": "INR",
         "method": "upi"
       }
     ]
@@ -505,7 +555,10 @@ x-api-key: sk_live_your_secret_key
 }
 ```
 
-Possible `status` values: `CREATED`, `ATTEMPTED`, `PAID`, `FAILED`, `CANCELLED`.
+After a successful capture, the response contains `order.status: "PAID"` and
+the captured payment contains `payments[].status: "CAPTURED"`. Before payment
+or after a failure, the order and payment statuses reflect their current
+states; do not mark an order paid based only on the customer's browser redirect.
 
 ---
 

@@ -13,7 +13,7 @@ export interface OutgoingWebhookPayload {
   timestamp: string;
   data?: Record<string, any>;
   order?: { id: string; receipt: string | null; amount: number; currency: string; status: string };
-  payment?: { id: string; razorpay_payment_id: string; status: string; amount: number; method: string | null };
+  payment?: { id: string; razorpay_payment_id: string; status: string; amount: number; currency: string; method: string | null };
 }
 
 export async function dispatchWebsiteWebhooks(

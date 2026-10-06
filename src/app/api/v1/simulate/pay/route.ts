@@ -79,6 +79,21 @@ export async function POST(req: NextRequest) {
       payment_id: simPaymentId,
       amount: order.amount,
       currency: order.currency,
+      order: {
+        id: order.id,
+        receipt: order.receipt,
+        amount: order.amount,
+        currency: order.currency,
+        status: "PAID",
+      },
+      payment: {
+        id: payment.id,
+        razorpay_payment_id: simPaymentId,
+        status: "CAPTURED",
+        amount: payment.amount,
+        currency: payment.currency,
+        method: payment.method,
+      },
       data: {
         internal_order_id: order.id,
         internal_payment_id: payment.id,

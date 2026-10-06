@@ -36,6 +36,7 @@ interface OrderCheckoutData {
     phone: string | null;
   } | null;
   razorpayKeyId: string;
+  isSimulated: boolean;
   latestPayment: {
     id: string;
     razorpayPaymentId: string | null;
@@ -46,6 +47,8 @@ interface OrderCheckoutData {
 
 export function OrderCheckoutClient({ data }: { data: OrderCheckoutData }) {
   const [paying, setPaying] = useState(false);
+  const [sdkReady, setSdkReady] = useState(data.isSimulated);
+  const [sdkError, setSdkError] = useState(false);
   const [isPaid, setIsPaid] = useState(data.order.status === "PAID");
   const [paidDetails, setPaidDetails] = useState<{
     paymentId: string;
@@ -66,21 +69,58 @@ export function OrderCheckoutClient({ data }: { data: OrderCheckoutData }) {
     null;
 
   useEffect(() => {
+    if (data.isSimulated) return;
+
     // Load Razorpay Checkout Script
+    if (window.Razorpay) {
+      setSdkReady(true);
+      return;
+    }
+
     if (!document.getElementById("razorpay-checkout-js")) {
       const script = document.createElement("script");
       script.id = "razorpay-checkout-js";
       script.src = "https://checkout.razorpay.com/v1/checkout.js";
       script.async = true;
+      script.onload = () => setSdkReady(true);
+      script.onerror = () => setSdkError(true);
       document.body.appendChild(script);
+    } else {
+      const script = document.getElementById("razorpay-checkout-js") as HTMLScriptElement;
+      script.addEventListener("load", () => setSdkReady(true), { once: true });
+      script.addEventListener("error", () => setSdkError(true), { once: true });
     }
-  }, []);
+  }, [data.isSimulated]);
 
   const handlePay = async () => {
     setPaying(true);
 
+    if (data.isSimulated) {
+      try {
+        const response = await fetch("/api/v1/simulate/pay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_id: data.order.id, method: "upi" }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || "Payment could not be completed. Please try again.");
+        }
+
+        setIsPaid(true);
+        setPaidDetails({ paymentId: result.payment?.razorpay_payment_id || "", method: result.payment?.method || "upi" });
+        toast.success("Payment confirmed successfully!");
+        if (redirectUrl) setTimeout(() => { window.location.href = redirectUrl; }, 1800);
+      } catch (error: any) {
+        toast.error(error.message || "Payment could not be completed. Please try again.");
+      } finally {
+        setPaying(false);
+      }
+      return;
+    }
+
     if (!window.Razorpay) {
-      toast.error("Payment SDK is loading, please wait a moment.");
+      toast.error(sdkError ? "Secure checkout could not load. Check your connection and reload." : "Secure checkout is still loading. Please wait a moment.");
       setPaying(false);
       return;
     }
@@ -229,21 +269,26 @@ export function OrderCheckoutClient({ data }: { data: OrderCheckoutData }) {
                 <div className="space-y-2 pt-2">
                   <Button
                     onClick={handlePay}
-                    disabled={paying}
+                    disabled={paying || (!data.isSimulated && !sdkReady)}
                     className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-semibold shadow-md shadow-emerald-600/20"
                   >
                     {paying ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Opening Payment Modal...
+                        {data.isSimulated ? "Processing Payment..." : "Opening Secure Checkout..."}
                       </>
                     ) : (
                       <>
                         <Lock className="mr-2 h-4 w-4" />
-                        Pay {formatCurrency(data.order.amount, data.order.currency)} Securely
+                        {!data.isSimulated && !sdkReady ? "Loading Secure Checkout..." : `Pay ${formatCurrency(data.order.amount, data.order.currency)} Securely`}
                       </>
                     )}
-                  </Button>
+                </Button>
+                {sdkError && !data.isSimulated && (
+                  <p role="alert" className="text-center text-xs text-rose-600">
+                    Secure checkout did not load. Please reload this page or try another network.
+                  </p>
+                )}
 
                   <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400 pt-1">
                     <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
